@@ -8,9 +8,9 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-func display(s tcell.Screen, data []byte) {
+func display(s Screen, data []byte) {
 	s.Clear()
-	style := tcell.StyleDefault.Foreground(tcell.ColorCadetBlue.TrueColor()).Background(tcell.ColorWhite)
+	style := tcell.StyleDefault.Foreground(tcell.ColorCadetBlue.TrueColor()).Background(tcell.ColorBlack)
 	x, y := 0, 0
 	for _, b := range data {
 		if b == '\n' {
@@ -33,33 +33,70 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	s, e := tcell.NewScreen()
+	scr, e := tcell.NewScreen()
 	if e != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", e)
 		os.Exit(1)
 	}
+	s := Screen{Screen: scr}
 	if e := s.Init(); e != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", e)
 		os.Exit(1)
 	}
+	s.ShowCursor(0, 0)
 
 	defStyle := tcell.StyleDefault.
 		Background(tcell.ColorBlack).
 		Foreground(tcell.ColorWhite)
 	s.SetStyle(defStyle)
 
-	display(s, b)
-
 	for {
+		display(s, b)
 		switch ev := s.PollEvent().(type) {
 		case *tcell.EventResize:
 			s.Sync()
 			display(s, b)
 		case *tcell.EventKey:
+			switch ev.Rune() {
+			case 'h', 'j', 'k', 'l':
+				s.SetCursor(ev.Rune())
+			}
 			if ev.Key() == tcell.KeyEscape {
 				s.Fini()
 				os.Exit(0)
 			}
 		}
 	}
+}
+
+type Screen struct {
+	tcell.Screen
+	cpos [2]uint16
+}
+
+func (s *Screen) SetCursor(r rune) {
+	w, h := s.Size()
+	switch r {
+	case 'h':
+		if s.cpos[0] == 0 {
+			break
+		}
+		s.cpos[0]--
+	case 'j':
+		if int(s.cpos[1]) == h-1 {
+			break
+		}
+		s.cpos[1]++
+	case 'k':
+		if s.cpos[1] == 0 {
+			break
+		}
+		s.cpos[1]--
+	case 'l':
+		if int(s.cpos[0]) == w-1 {
+			break
+		}
+		s.cpos[0]++
+	}
+	s.ShowCursor(int(s.cpos[0]), int(s.cpos[1]))
 }
