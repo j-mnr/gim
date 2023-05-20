@@ -8,7 +8,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
-func display(s Screen, data []byte) {
+func display(s Gim, data []byte) {
 	s.Clear()
 	style := tcell.StyleDefault.Foreground(tcell.ColorCadetBlue.TrueColor()).Background(tcell.ColorBlack)
 	x, y := 0, 0
@@ -38,13 +38,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", e)
 		os.Exit(1)
 	}
-	s := Screen{Screen: scr}
+	s := Gim{Screen: scr}
 	if e := s.Init(); e != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", e)
 		os.Exit(1)
 	}
 	s.ShowCursor(0, 0)
 
+	s.EnableMouse()
 	defStyle := tcell.StyleDefault.
 		Background(tcell.ColorBlack).
 		Foreground(tcell.ColorWhite)
@@ -60,6 +61,12 @@ func main() {
 			switch ev.Rune() {
 			case 'h', 'j', 'k', 'l':
 				s.SetCursor(ev.Rune())
+			case 'Z':
+				ev := s.PollEvent()
+				if ek, ok := ev.(*tcell.EventKey); ok && ek.Rune() == 'Q' {
+					s.Fini()
+					os.Exit(0)
+				}
 			}
 			if ev.Key() == tcell.KeyEscape {
 				s.Fini()
@@ -69,12 +76,12 @@ func main() {
 	}
 }
 
-type Screen struct {
+type Gim struct {
 	tcell.Screen
 	cpos [2]uint16
 }
 
-func (s *Screen) SetCursor(r rune) {
+func (s *Gim) SetCursor(r rune) {
 	w, h := s.Size()
 	switch r {
 	case 'h':
