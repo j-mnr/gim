@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
@@ -33,6 +35,7 @@ type (
 	Cursor struct {
 		style tcell.CursorStyle
 		Spot
+		virt Spot
 	}
 )
 
@@ -61,13 +64,11 @@ func NewGim(s tcell.Screen, texts []io.Reader) *Gim {
 	}
 	gim.ShowCursor(0, 0)
 	gim.EnableMouse()
-	defStyle := tcell.StyleDefault.
-		Background(tcell.ColorBlack.TrueColor()).
-		Foreground(tcell.ColorWhite)
-	gim.SetStyle(defStyle)
-
-	_, h := gim.Size()
+	gim.SetStyle(tcell.StyleDefault.
+		Background(tcell.ColorBlack).
+		Foreground(tcell.ColorBlack.TrueColor()))
 	bufs := make([]Buffer, len(texts))
+	_, h := gim.Size()
 	for i, r := range texts {
 		var contents Text
 		scnr := bufio.NewScanner(r)
@@ -108,8 +109,8 @@ type Spot struct{ X, Y int }
 
 func draw(g *Gim) {
 	g.Clear()
-	style := tcell.StyleDefault.Attributes(tcell.AttrBlink | tcell.AttrBold).
-		Foreground(tcell.ColorBlack.TrueColor()).Background(tcell.ColorBlack)
+	style := tcell.StyleDefault.Attributes(tcell.AttrBold).
+		Foreground(tcell.ColorWhite.TrueColor()).Background(tcell.ColorBlack)
 	for y, line := range g.Buffers[0].Window() {
 		for x, r := range *line {
 			g.SetContent(x, y, r, nil, style)
@@ -130,18 +131,6 @@ func main() {
 		os.Exit(1)
 	}
 	gim := NewGim(scr, []io.Reader{f})
-	style := tcell.StyleDefault.Foreground(tcell.ColorCadetBlue.TrueColor()).
-		Background(tcell.ColorBlack)
-
-	for y, line := range gim.Buffers[0].Text[:1] {
-		if len(*line) == 0 {
-			gim.SetContent(0, y, ' ', nil, style)
-		}
-		for x, r := range *line {
-			gim.SetContent(x, y, r, nil, style)
-		}
-	}
-
 	for {
 		draw(gim)
 		switch ev := gim.PollEvent().(type) {
@@ -150,7 +139,8 @@ func main() {
 			draw(gim)
 		case *tcell.EventKey:
 			switch ev.Rune() {
-			case 'h', 'j', 'k', 'l':
+			// Movement keys
+			case 'h', 'j', 'k', 'l', '^', '$':
 				gim.Buffers[0].UpdateWindow(ev.Rune())
 			case 'Z':
 				ev := gim.PollEvent()
@@ -163,15 +153,24 @@ func main() {
 	}
 }
 
-func (b Buffer) Line(bufno int) Line {
-	return *b.Text.Line(b.Cursor.Spot.Y)
-}
-
 func (b *Buffer) UpdateWindow(r rune) {
 	hasReachedCriticalMass := func(y int) bool {
 		return !(y >= 0 && y <= 53)
 	}
+	endCol := func() int { return len(*b.Window()[b.Cursor.Spot.Y]) - 1 }
 	switch r {
+	case '^':
+		b.Cursor.Spot.X = strings.IndexFunc(string(*b.Window()[b.Cursor.Spot.Y]), func(r rune) bool {
+			return unicode.IsLetter(r) || unicode.IsNumber(r)
+		})
+		if b.Cursor.Spot.X == -1 {
+			b.Cursor.Spot.X = 0
+		}
+	case '$':
+		b.Cursor.Spot.X = endCol()
+		if b.Cursor.Spot.X == -1 {
+			b.Cursor.Spot.X = 0
+		}
 	case 'h':
 		if b.Cursor.Spot.X == 0 {
 			break
@@ -189,13 +188,7 @@ func (b *Buffer) UpdateWindow(r rune) {
 			}
 			break
 		}
-		if endCol := len(b.Line(0)) - 1; b.Cursor.Spot.X > endCol {
-			if endCol < 0 {
-				b.Cursor.Spot.X = 0
-				break
-			}
-			b.Cursor.Spot.X = endCol
-		}
+		b.Cursor.UpdateX(endCol())
 	case 'k':
 		b.Cursor.Spot.Y--
 		if hasReachedCriticalMass(b.Cursor.Y) {
@@ -208,17 +201,21 @@ func (b *Buffer) UpdateWindow(r rune) {
 			}
 			break
 		}
-		if endCol := len(b.Line(0)) - 1; b.Cursor.Spot.X > endCol {
-			if endCol < 0 {
-				b.Cursor.Spot.X = 0
-				break
-			}
-			b.Cursor.Spot.X = endCol
-		}
+		b.Cursor.UpdateX(endCol())
 	case 'l':
-		if b.Cursor.Spot.X > len(b.Line(0))-1 {
+		if b.Cursor.Spot.X > endCol() {
 			break
 		}
 		b.Cursor.Spot.X++
+	}
+}
+
+func (c *Cursor) UpdateX(col int) {
+	if c.Spot.X <= col {
+		return
+	}
+	c.Spot.X = col
+	if c.Spot.X < 0 {
+		c.Spot.X = 0
 	}
 }
