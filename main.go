@@ -26,6 +26,7 @@ type (
 		Text Text
 		Bounds
 		Cursor
+		Height int
 	}
 
 	// Bounds represent the visual area that can be seen on a [tcell.Screen].
@@ -79,6 +80,7 @@ func NewGim(s tcell.Screen, texts []io.Reader) *Gim {
 			Text:   contents,
 			Bounds: Bounds{Base: h},
 			Cursor: Cursor{Spot: Spot{Y: h / 2}},
+			Height: h,
 		}
 	}
 	gim.Buffers = bufs
@@ -135,12 +137,24 @@ func main() {
 		draw(gim)
 		switch ev := gim.PollEvent().(type) {
 		case *tcell.EventResize:
-			gim.Sync()
+			_, h := gim.Size()
+			for i := range gim.Buffers {
+				gim.Buffers[i].Height = h
+				if gim.Buffers[i].Y > h {
+					gim.Buffers[i].Y = h - 1
+				}
+				gim.Buffers[i].Base = h
+			}
+
+			dbug.Println("A RESIZE EVENT HAS OCCURRED!!!! ", h)
+			b := gim.Buffers[0]
+			dbug.Printf("%+v and %+v\n", b.Bounds, b.Cursor)
 			draw(gim)
+			gim.Sync()
 		case *tcell.EventKey:
 			switch ev.Rune() {
 			// Movement keys
-			case 'h', 'j', 'k', 'l', '^', '$':
+			case 'h', 'j', 'k', 'l', '^', '$', 'g', 'G':
 				gim.Buffers[0].UpdateWindow(ev.Rune())
 			case 'Z':
 				ev := gim.PollEvent()
@@ -153,12 +167,24 @@ func main() {
 	}
 }
 
+const (
+	topEdge = 0
+)
+
 func (b *Buffer) UpdateWindow(r rune) {
-	hasReachedCriticalMass := func(y int) bool {
-		return !(y >= 0 && y <= 53)
+	isAtEdge := func(y int) bool {
+		return !(y >= topEdge && y < b.Height)
 	}
 	endCol := func() int { return len(*b.Window()[b.Cursor.Spot.Y]) - 1 }
 	switch r {
+	case 'g':
+		b.Cursor.Y = topEdge
+		b.Bounds.Top = 0
+		b.Bounds.Base = b.Height
+	case 'G':
+		b.Cursor.Y = b.Height - 1
+		b.Bounds.Top = len(b.Text) - len(b.Window())
+		b.Bounds.Base = len(b.Text)
 	case '^':
 		b.Cursor.Spot.X = strings.IndexFunc(string(*b.Window()[b.Cursor.Spot.Y]), func(r rune) bool {
 			return unicode.IsLetter(r) || unicode.IsNumber(r)
@@ -178,7 +204,7 @@ func (b *Buffer) UpdateWindow(r rune) {
 		b.Cursor.Spot.X--
 	case 'j':
 		b.Cursor.Spot.Y++
-		if hasReachedCriticalMass(b.Cursor.Y) {
+		if isAtEdge(b.Cursor.Y) {
 			b.Cursor.Spot.Y--
 			b.Bounds.Top++
 			b.Bounds.Base++
@@ -191,7 +217,7 @@ func (b *Buffer) UpdateWindow(r rune) {
 		b.Cursor.UpdateX(endCol())
 	case 'k':
 		b.Cursor.Spot.Y--
-		if hasReachedCriticalMass(b.Cursor.Y) {
+		if isAtEdge(b.Cursor.Y) {
 			b.Cursor.Spot.Y++
 			b.Bounds.Top--
 			b.Bounds.Base--
@@ -208,6 +234,7 @@ func (b *Buffer) UpdateWindow(r rune) {
 		}
 		b.Cursor.Spot.X++
 	}
+	dbug.Printf("%+v and %+v\n", b.Bounds, b.Cursor)
 }
 
 func (c *Cursor) UpdateX(col int) {
