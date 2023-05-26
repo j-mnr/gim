@@ -192,15 +192,18 @@ func (b *Buffer) UpdateWindow(r rune) {
 		if b.Cursor.Spot.X == -1 {
 			b.Cursor.Spot.X = 0
 		}
+		b.Cursor.virt.X = b.X
 	case '$':
 		b.Cursor.Spot.X = endCol()
 		if b.Cursor.Spot.X == -1 {
 			b.Cursor.Spot.X = 0
 		}
+		b.Cursor.virt.X = b.Cursor.X
 	case 'h':
 		if b.Cursor.Spot.X == 0 {
 			break
 		}
+		b.Cursor.virt.X--
 		b.Cursor.Spot.X--
 	case 'j':
 		b.Cursor.Spot.Y++
@@ -232,17 +235,18 @@ func (b *Buffer) UpdateWindow(r rune) {
 		if b.Cursor.Spot.X > endCol() {
 			break
 		}
+		b.Cursor.virt.X++
 		b.Cursor.Spot.X++
 	}
-	dbug.Printf("%+v and %+v\n", b.Bounds, b.Cursor)
+	dbug.Printf("%+v and %+v, endCol: %+v\n", b.Bounds, b.Cursor, endCol())
 }
 
 func (c *Cursor) UpdateX(col int) {
-	if c.Spot.X <= col {
-		return
-	}
 	c.Spot.X = col
 	if c.Spot.X < 0 {
 		c.Spot.X = 0
+	}
+	if c.virt.X <= col {
+		c.Spot.X = c.virt.X
 	}
 }
