@@ -11,13 +11,31 @@ import (
 	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
+	"golang.org/x/text/unicode/rangetable"
 )
 
 var dbug *log.Logger
+var GimWord *unicode.RangeTable
 
 func init() {
 	f, _ := os.Create("debug.log")
 	dbug = log.New(f, "", log.Llongfile|log.Ltime)
+}
+
+func init() {
+	runes := make([]rune, 26*2+1)
+	for i := 0; i < 26; i++ {
+		runes[i] = rune('a' + i)
+	}
+	for i := 0; i < 26; i++ {
+		runes[i+25] = rune('A' + i)
+	}
+	runes[len(runes)-1] = '_'
+	GimWord = rangetable.Merge(unicode.L, unicode.N,
+		// '_' character
+		&unicode.RangeTable{R16: []unicode.Range16{{Lo: 95, Hi: 95, Stride: 1}}, LatinOffset: 1},
+	)
+	dbug.Printf("%+v\n", GimWord)
 }
 
 type (
@@ -35,8 +53,8 @@ type (
 	// Cursor is a indicator used to show the current position on a [tcell.Screen].
 	Cursor struct {
 		style tcell.CursorStyle
-		Spot
-		virt Spot
+		X, Y  int
+		virtX int
 	}
 )
 
@@ -79,7 +97,7 @@ func NewGim(s tcell.Screen, texts []io.Reader) *Gim {
 		bufs[i] = Buffer{
 			Text:   contents,
 			Bounds: Bounds{Base: h},
-			Cursor: Cursor{Spot: Spot{Y: h / 2}},
+			Cursor: Cursor{Y: h / 2},
 			Height: h,
 		}
 	}
@@ -118,7 +136,7 @@ func draw(g *Gim) {
 			g.SetContent(x, y, r, nil, style)
 		}
 	}
-	g.ShowCursor(g.Buffers[0].Cursor.Spot.X, g.Buffers[0].Cursor.Spot.Y)
+	g.ShowCursor(g.Buffers[0].Cursor.X, g.Buffers[0].Cursor.Y)
 	g.Show()
 }
 
@@ -154,7 +172,7 @@ func main() {
 		case *tcell.EventKey:
 			switch ev.Rune() {
 			// Movement keys
-			case 'h', 'j', 'k', 'l', '^', '$', 'g', 'G':
+			case 'h', 'j', 'k', 'l', '^', '$', 'g', 'G', 'w', 'W':
 				gim.Buffers[0].UpdateWindow(ev.Rune())
 			case 'Z':
 				ev := gim.PollEvent()
@@ -171,12 +189,145 @@ const (
 	topEdge = 0
 )
 
+func getWordAtIndex(line Line, index int) string {
+	// Check if the index is within the valid range of the line
+	if index < 0 || index >= len(line) {
+		return ""
+	}
+
+	// Find the start and end indices of the word
+	startIndex := index
+	endIndex := index
+
+	// TODO(jay): Update this to "word"
+	for startIndex > 0 && !unicode.IsSpace(line[startIndex-1]) {
+		startIndex--
+	}
+
+	// TODO(jay): Update this to "word"
+	for endIndex < len(line)-1 && !unicode.IsSpace(line[endIndex+1]) {
+		endIndex++
+	}
+	return string(line[startIndex : endIndex+1])
+}
+
 func (b *Buffer) UpdateWindow(r rune) {
 	isAtEdge := func(y int) bool {
 		return !(y >= topEdge && y < b.Height)
 	}
-	endCol := func() int { return len(*b.Window()[b.Cursor.Spot.Y]) - 1 }
+	endCol := func() int { return len(*b.Window()[b.Cursor.Y]) - 1 }
 	switch r {
+	case 'w':
+		// When on "White space" character what do?
+		// When on "Punct/Symbol" character what do?
+		// When on "Alnum_" character what do?
+		line := *b.Window().Line(b.Cursor.Y)
+		if b.X >= len(line) {
+			b.Cursor.X = 0
+			b.Cursor.virtX = 0
+			b.Cursor.Y++
+			if isAtEdge(b.Cursor.Y) {
+				b.Cursor.Y--
+				b.Bounds.Top++
+				b.Bounds.Base++
+				if b.Bounds.Base > len(b.Text) {
+					b.Bounds.Top--
+					b.Bounds.Base = len(b.Text)
+					b.Cursor.X = len(*b.Text.Line(len(b.Text) - 1))
+					b.Cursor.virtX = len(*b.Text.Line(len(b.Text) - 1))
+				}
+				break
+			}
+			break
+		}
+		var nextIdx, nextWordIdx int
+		dbug.Printf("Indexing: %q\n", string(line[b.Cursor.X:]))
+		switch {
+		case unicode.IsSpace(line[b.X]):
+			nextIdx = strings.IndexFunc(string(line[b.Cursor.X:]), func(r rune) bool {
+				return !unicode.IsSpace(r)
+			})
+		case !unicode.Is(GimWord, line[b.X]):
+			dbug.Println("Why aren't we making it in here?")
+			nextIdx = strings.IndexFunc(string(line[b.Cursor.X:]), func(r rune) bool {
+				dbug.Printf("!gimword, is gim word %s: %t\n", string(r), unicode.Is(GimWord, r))
+				return unicode.Is(GimWord, r) || unicode.IsSpace(r)
+			})
+			if nextIdx != -1 && unicode.IsSpace(line[b.Cursor.X+nextIdx]) {
+				nextIdx += strings.IndexFunc(string(line[b.Cursor.X+nextIdx:]), func(r rune) bool {
+					return !unicode.IsSpace(r)
+				})
+				dbug.Printf("Indexing after space: %q\n", string(line[nextIdx+b.Cursor.X:]))
+			}
+		default:
+			nextIdx = strings.IndexFunc(string(line[b.Cursor.X:]), func(r rune) bool {
+				dbug.Printf("is gim word %s: %t\n", string(r), unicode.Is(GimWord, r))
+				return !unicode.Is(GimWord, r)
+			})
+			dbug.Printf("Indexing: %q\n", string(line[nextIdx+b.Cursor.X:]))
+			dbug.Println("Non index:", nextIdx, "Next index:", nextWordIdx)
+			if nextIdx != -1 && unicode.IsSpace(line[b.Cursor.X+nextIdx]) {
+				nextIdx += strings.IndexFunc(string(line[b.Cursor.X+nextIdx:]), func(r rune) bool {
+					return !unicode.IsSpace(r)
+				})
+				dbug.Printf("Indexing after space: %q\n", string(line[nextIdx+b.Cursor.X:]))
+			}
+		}
+		word := getWordAtIndex(line, b.Cursor.X)
+		dbug.Println("Current word: ", word)
+		if nextIdx == -1 {
+			b.Cursor.X = 0
+			b.Cursor.virtX = 0
+			b.Cursor.Y++
+			if isAtEdge(b.Cursor.Y) {
+				b.Cursor.Y--
+				b.Bounds.Top++
+				b.Bounds.Base++
+				if b.Bounds.Base > len(b.Text) {
+					b.Bounds.Top--
+					b.Bounds.Base = len(b.Text)
+					b.Cursor.X = len(*b.Text.Line(len(b.Text) - 1))
+					b.Cursor.virtX = len(*b.Text.Line(len(b.Text) - 1))
+				}
+				break
+			}
+			break
+		}
+		b.Cursor.X += nextIdx + nextWordIdx
+		b.Cursor.virtX += nextIdx + nextWordIdx
+	case 'W':
+		line := *b.Window().Line(b.Cursor.Y)
+		word := getWordAtIndex(line, b.Cursor.X)
+		dbug.Println("Current word: ", word)
+		wsIdx := strings.IndexFunc(string(line[b.Cursor.X:]), func(r rune) bool {
+			return unicode.IsSpace(r)
+		})
+		dbug.Printf("Indexing: %q\n", string(line[b.Cursor.X:]))
+		if wsIdx == -1 {
+			b.Cursor.X = 0
+			b.Cursor.virtX = 0
+			b.Cursor.Y++
+			if isAtEdge(b.Cursor.Y) {
+				b.Cursor.Y--
+				b.Bounds.Top++
+				b.Bounds.Base++
+				if b.Bounds.Base > len(b.Text) {
+					b.Bounds.Top--
+					b.Bounds.Base = len(b.Text)
+					b.Cursor.X = len(*b.Text.Line(len(b.Text) - 1))
+					b.Cursor.virtX = len(*b.Text.Line(len(b.Text) - 1))
+				}
+				break
+			}
+			break
+		}
+		dbug.Printf("Indexing: %q\n", string(line[wsIdx+b.Cursor.X:]))
+		nextWordIdx := strings.IndexFunc(string(line[wsIdx+b.Cursor.X:]), func(r rune) bool {
+			return !unicode.IsSpace(r)
+		})
+		dbug.Println("Non index:", wsIdx, "Next index:", nextWordIdx)
+		b.Cursor.X += wsIdx + nextWordIdx
+		b.Cursor.virtX += wsIdx + nextWordIdx
 	case 'g':
 		b.Cursor.Y = topEdge
 		b.Bounds.Top = 0
@@ -186,29 +337,29 @@ func (b *Buffer) UpdateWindow(r rune) {
 		b.Bounds.Top = len(b.Text) - len(b.Window())
 		b.Bounds.Base = len(b.Text)
 	case '^':
-		b.Cursor.Spot.X = strings.IndexFunc(string(*b.Window()[b.Cursor.Spot.Y]), func(r rune) bool {
+		b.Cursor.X = strings.IndexFunc(string(*b.Window()[b.Cursor.Y]), func(r rune) bool {
 			return unicode.IsLetter(r) || unicode.IsNumber(r)
 		})
-		if b.Cursor.Spot.X == -1 {
-			b.Cursor.Spot.X = 0
+		if b.Cursor.X == -1 {
+			b.Cursor.X = 0
 		}
-		b.Cursor.virt.X = b.X
+		b.Cursor.virtX = b.X
 	case '$':
-		b.Cursor.Spot.X = endCol()
-		if b.Cursor.Spot.X == -1 {
-			b.Cursor.Spot.X = 0
+		b.Cursor.X = endCol()
+		if b.Cursor.X == -1 {
+			b.Cursor.X = 0
 		}
-		b.Cursor.virt.X = b.Cursor.X
+		b.Cursor.virtX = b.Cursor.X
 	case 'h':
-		if b.Cursor.Spot.X == 0 {
+		if b.Cursor.X == 0 {
 			break
 		}
-		b.Cursor.virt.X--
-		b.Cursor.Spot.X--
+		b.Cursor.virtX--
+		b.Cursor.X--
 	case 'j':
-		b.Cursor.Spot.Y++
+		b.Cursor.Y++
 		if isAtEdge(b.Cursor.Y) {
-			b.Cursor.Spot.Y--
+			b.Cursor.Y--
 			b.Bounds.Top++
 			b.Bounds.Base++
 			if b.Bounds.Base > len(b.Text) {
@@ -219,9 +370,9 @@ func (b *Buffer) UpdateWindow(r rune) {
 		}
 		b.Cursor.UpdateX(endCol())
 	case 'k':
-		b.Cursor.Spot.Y--
+		b.Cursor.Y--
 		if isAtEdge(b.Cursor.Y) {
-			b.Cursor.Spot.Y++
+			b.Cursor.Y++
 			b.Bounds.Top--
 			b.Bounds.Base--
 			if b.Bounds.Top < 0 {
@@ -232,21 +383,21 @@ func (b *Buffer) UpdateWindow(r rune) {
 		}
 		b.Cursor.UpdateX(endCol())
 	case 'l':
-		if b.Cursor.Spot.X > endCol() {
+		if b.Cursor.X > endCol() {
 			break
 		}
-		b.Cursor.virt.X++
-		b.Cursor.Spot.X++
+		b.Cursor.virtX++
+		b.Cursor.X++
 	}
 	dbug.Printf("%+v and %+v, endCol: %+v\n", b.Bounds, b.Cursor, endCol())
 }
 
 func (c *Cursor) UpdateX(col int) {
-	c.Spot.X = col
-	if c.Spot.X < 0 {
-		c.Spot.X = 0
+	c.X = col
+	if c.X < 0 {
+		c.X = 0
 	}
-	if c.virt.X <= col {
-		c.Spot.X = c.virt.X
+	if c.virtX <= col {
+		c.X = c.virtX
 	}
 }
