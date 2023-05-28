@@ -2,7 +2,10 @@ module github.com/j-mnr/gim
 
 go 1.20
 
-require github.com/gdamore/tcell/v2 v2.6.0
+require (
+	github.com/gdamore/tcell/v2 v2.6.0
+	golang.org/x/text v0.7.0
+)
 
 require (
 	github.com/gdamore/encoding v1.0.0 // indirect
@@ -11,5 +14,4 @@ require (
 	github.com/rivo/uniseg v0.4.3 // indirect
 	golang.org/x/sys v0.5.0 // indirect
 	golang.org/x/term v0.5.0 // indirect
-	golang.org/x/text v0.7.0 // indirect
 )
