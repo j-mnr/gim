@@ -14,6 +14,8 @@ import (
 	"golang.org/x/text/unicode/rangetable"
 )
 
+const fill = 'x'
+
 var dbug *log.Logger
 var GimWord *unicode.RangeTable
 
@@ -304,7 +306,10 @@ func (b *Buffer) UpdateWindow(r rune) {
 					break
 				}
 			}
-			n := KeyShiftB(*b.Window().Line(b.Y))
+			n := KeyShiftB(append(*b.Window().Line(b.Y), fill))
+			if n == -1 {
+				n = 0
+			}
 			b.X, b.virtX = n, n
 			break
 		}
@@ -322,7 +327,7 @@ func (b *Buffer) UpdateWindow(r rune) {
 					break
 				}
 			}
-			n := KeyShiftB(*b.Window().Line(b.Y))
+			n := KeyShiftB(append(*b.Window().Line(b.Y), fill))
 			if n == -1 {
 				n = 0
 			}
