@@ -96,8 +96,7 @@ func NewGim(s tcell.Screen, texts []io.Reader) *Gim {
 		}
 		bufs[i] = Buffer{
 			Text:   contents,
-			Bounds: Bounds{Base: h},
-			Cursor: Cursor{Y: h / 2},
+			Bounds: Bounds{Base: len(contents)},
 			Height: h,
 		}
 	}
@@ -172,7 +171,7 @@ func main() {
 		case *tcell.EventKey:
 			switch ev.Rune() {
 			// Movement keys
-			case 'h', 'j', 'k', 'l', '^', '$', 'g', 'G', 'w', 'W':
+			case 'h', 'j', 'k', 'l', '^', '$', 'g', 'G', 'w', 'W', 'b', 'B':
 				gim.Buffers[0].UpdateWindow(ev.Rune())
 			case 'Z':
 				ev := gim.PollEvent()
@@ -211,22 +210,134 @@ func getWordAtIndex(line Line, index int) string {
 	return string(line[startIndex : endIndex+1])
 }
 
+func (b Buffer) CP() rune {
+	return (*b.Window().Line(b.Y))[b.X]
+}
+
+func KeyB(line []rune) (index int) {
+	if len(line) == 0 {
+		return 0
+	}
+	n := len(line) - 1
+	switch {
+	case unicode.IsSpace(line[n]):
+		nonWSIdx := strings.LastIndexFunc(string(line), func(r rune) bool {
+			return !unicode.IsSpace(r)
+		})
+		index = strings.LastIndexFunc(string(line[:nonWSIdx]), func(r rune) bool {
+			return unicode.IsSpace(r)
+		})
+	case unicode.Is(GimWord, line[n]):
+	default: // Any other code point that's not white space.
+		// Special case: Start of word needs to go back to last word.
+		if n+1 >= 2 && unicode.IsSpace(line[n-1]) && !unicode.IsSpace(line[n]) {
+			return KeyShiftB(line[:n])
+		}
+		index = strings.LastIndexFunc(string(line), func(r rune) bool {
+			return unicode.IsSpace(r)
+		})
+		dbug.Printf("line: %s\n", string(line))
+		dbug.Println("index:", index)
+	}
+	return index + 1
+}
+
+// KeyShiftB finds the index in the given line that would get you one WORD back from the end of the
+// line. If no such WORD exists -1 is returned as a sentinel value.
+func KeyShiftB(line []rune) (index int) {
+	if len(line) <= 1 {
+		return -1
+	}
+	s, n := string(line), len(line)-1
+	switch {
+	case unicode.IsSpace(line[n]):
+		wsIdx := strings.LastIndexFunc(s, func(r rune) bool {
+			return unicode.IsSpace(r)
+		})
+		if wsIdx == -1 {
+			return wsIdx
+		}
+		nonWSIdx := strings.LastIndexFunc(s[:wsIdx], func(r rune) bool {
+			return !unicode.IsSpace(r)
+		})
+		if nonWSIdx == -1 {
+			return nonWSIdx
+		}
+		for i := nonWSIdx; i >= 0; i-- {
+			if unicode.IsSpace(line[i]) {
+				break
+			}
+			index = i
+		}
+	case unicode.IsSpace(line[n-1]):
+		return KeyShiftB(line[:n])
+	default:
+		for i := n; i >= 0; i-- {
+			if unicode.IsSpace(line[i]) {
+				break
+			}
+			index = i
+		}
+	}
+	return index
+}
+
 func (b *Buffer) UpdateWindow(r rune) {
-	isAtEdge := func(y int) bool {
-		return !(y >= topEdge && y < b.Height)
+	isPastBound := func(y int) bool {
+		return y < topEdge || y >= b.Height
 	}
 	endCol := func() int { return len(*b.Window()[b.Cursor.Y]) - 1 }
+	line := *b.Window().Line(b.Cursor.Y)
 	switch r {
+	case 'b':
+	case 'B':
+		if len(line) == 0 {
+			b.Cursor.Y--
+			if isPastBound(b.Cursor.Y) {
+				b.Cursor.Y++
+				b.Bounds.Top--
+				b.Bounds.Base--
+				if b.Bounds.Top < 0 {
+					b.Bounds.Top = 0
+					b.Bounds.Base++
+					b.Cursor.X, b.Cursor.virtX = 0, 0
+					break
+				}
+			}
+			n := KeyShiftB(*b.Window().Line(b.Y))
+			b.X, b.virtX = n, n
+			break
+		}
+		i := KeyShiftB((*b.Window().Line(b.Y))[:b.X+1])
+		if i == -1 {
+			b.Cursor.Y--
+			if isPastBound(b.Y) {
+				b.Cursor.Y++
+				b.Bounds.Top--
+				b.Bounds.Base--
+				if b.Bounds.Top < 0 {
+					b.Bounds.Top = 0
+					b.Bounds.Base++
+					b.Cursor.X, b.Cursor.virtX = 0, 0
+					break
+				}
+			}
+			n := KeyShiftB(*b.Window().Line(b.Y))
+			if n == -1 {
+				n = 0
+			}
+			b.X, b.virtX = n, n
+			break
+		}
+		b.Cursor.X = i
+		b.virtX = i
 	case 'w':
-		// When on "White space" character what do?
-		// When on "Punct/Symbol" character what do?
-		// When on "Alnum_" character what do?
-		line := *b.Window().Line(b.Cursor.Y)
+		// keyW(*b.Window().Line(b.Y))
 		if b.X >= len(line) {
 			b.Cursor.X = 0
 			b.Cursor.virtX = 0
 			b.Cursor.Y++
-			if isAtEdge(b.Cursor.Y) {
+			if isPastBound(b.Cursor.Y) {
 				b.Cursor.Y--
 				b.Bounds.Top++
 				b.Bounds.Base++
@@ -236,7 +347,6 @@ func (b *Buffer) UpdateWindow(r rune) {
 					b.Cursor.X = len(*b.Text.Line(len(b.Text) - 1))
 					b.Cursor.virtX = len(*b.Text.Line(len(b.Text) - 1))
 				}
-				break
 			}
 			break
 		}
@@ -248,38 +358,29 @@ func (b *Buffer) UpdateWindow(r rune) {
 				return !unicode.IsSpace(r)
 			})
 		case !unicode.Is(GimWord, line[b.X]):
-			dbug.Println("Why aren't we making it in here?")
 			nextIdx = strings.IndexFunc(string(line[b.Cursor.X:]), func(r rune) bool {
-				dbug.Printf("!gimword, is gim word %s: %t\n", string(r), unicode.Is(GimWord, r))
 				return unicode.Is(GimWord, r) || unicode.IsSpace(r)
 			})
 			if nextIdx != -1 && unicode.IsSpace(line[b.Cursor.X+nextIdx]) {
 				nextIdx += strings.IndexFunc(string(line[b.Cursor.X+nextIdx:]), func(r rune) bool {
 					return !unicode.IsSpace(r)
 				})
-				dbug.Printf("Indexing after space: %q\n", string(line[nextIdx+b.Cursor.X:]))
 			}
 		default:
 			nextIdx = strings.IndexFunc(string(line[b.Cursor.X:]), func(r rune) bool {
-				dbug.Printf("is gim word %s: %t\n", string(r), unicode.Is(GimWord, r))
 				return !unicode.Is(GimWord, r)
 			})
-			dbug.Printf("Indexing: %q\n", string(line[nextIdx+b.Cursor.X:]))
-			dbug.Println("Non index:", nextIdx, "Next index:", nextWordIdx)
 			if nextIdx != -1 && unicode.IsSpace(line[b.Cursor.X+nextIdx]) {
 				nextIdx += strings.IndexFunc(string(line[b.Cursor.X+nextIdx:]), func(r rune) bool {
 					return !unicode.IsSpace(r)
 				})
-				dbug.Printf("Indexing after space: %q\n", string(line[nextIdx+b.Cursor.X:]))
 			}
 		}
-		word := getWordAtIndex(line, b.Cursor.X)
-		dbug.Println("Current word: ", word)
 		if nextIdx == -1 {
 			b.Cursor.X = 0
 			b.Cursor.virtX = 0
 			b.Cursor.Y++
-			if isAtEdge(b.Cursor.Y) {
+			if isPastBound(b.Cursor.Y) {
 				b.Cursor.Y--
 				b.Bounds.Top++
 				b.Bounds.Base++
@@ -296,18 +397,13 @@ func (b *Buffer) UpdateWindow(r rune) {
 		b.Cursor.X += nextIdx + nextWordIdx
 		b.Cursor.virtX += nextIdx + nextWordIdx
 	case 'W':
-		line := *b.Window().Line(b.Cursor.Y)
-		word := getWordAtIndex(line, b.Cursor.X)
-		dbug.Println("Current word: ", word)
 		wsIdx := strings.IndexFunc(string(line[b.Cursor.X:]), func(r rune) bool {
 			return unicode.IsSpace(r)
 		})
-		dbug.Printf("Indexing: %q\n", string(line[b.Cursor.X:]))
 		if wsIdx == -1 {
-			b.Cursor.X = 0
-			b.Cursor.virtX = 0
-			b.Cursor.Y++
-			if isAtEdge(b.Cursor.Y) {
+			b.X, b.virtX = 0, 0
+			b.Y++
+			if isPastBound(b.Cursor.Y) {
 				b.Cursor.Y--
 				b.Bounds.Top++
 				b.Bounds.Base++
@@ -358,7 +454,7 @@ func (b *Buffer) UpdateWindow(r rune) {
 		b.Cursor.X--
 	case 'j':
 		b.Cursor.Y++
-		if isAtEdge(b.Cursor.Y) {
+		if isPastBound(b.Cursor.Y) {
 			b.Cursor.Y--
 			b.Bounds.Top++
 			b.Bounds.Base++
@@ -371,7 +467,7 @@ func (b *Buffer) UpdateWindow(r rune) {
 		b.Cursor.UpdateX(endCol())
 	case 'k':
 		b.Cursor.Y--
-		if isAtEdge(b.Cursor.Y) {
+		if isPastBound(b.Cursor.Y) {
 			b.Cursor.Y++
 			b.Bounds.Top--
 			b.Bounds.Base--
