@@ -1,0 +1,13 @@
+linters:
+  enable-all: true
+  disable:
+    - depguard
+    - gci
+    - gofumpt
+    - exhaustivestruct
+    - exhaustruct
+    - ireturn
+    - nlreturn
+    - nonamedreturns
+    - varnamelen
+    - wsl
