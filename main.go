@@ -5,28 +5,39 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 
 	"github.com/gdamore/tcell/v2"
 )
 
 type Gim struct {
-	screen tcell.Screen
-	focus *Buffer
+	screen  tcell.Screen
+	focus   *Buffer
 	buffers []*Buffer
-	style tcell.Style
+	style   tcell.Style
 }
 
 func (g Gim) Draw() {
-		g.screen.Clear()
+	g.screen.Clear()
 
-		for row, line := range g.focus.Window() {
-			for col, r := range line {
-				g.screen.ShowCursor(g.focus.cursor.col, g.focus.cursor.row)
-				g.screen.SetContent(col+5, row, r, nil, g.style)
+	for row, line := range g.focus.Window() {
+		start := strconv.Itoa(row + 1 + int(g.focus.windowStart))
+		padding := 3 // TODO(jay): Needs to be from g.focus.fullText
+		for i := 0; i < padding; i++ {
+			r := ' '
+			if diff := padding - len(start) - i; diff < 1 {
+				r = rune(start[-diff])
 			}
+			g.screen.SetContent(i, row, r, nil, g.style)
 		}
+		g.screen.SetContent(padding, row, tcell.RuneVLine, nil, g.style)
+		for col, r := range line {
+			g.screen.ShowCursor(g.focus.cursor.col, g.focus.cursor.row)
+			g.screen.SetContent(col+4, row, r, nil, g.style)
+		}
+	}
 
-		g.screen.Show()
+	g.screen.Show()
 }
 
 func main() {
@@ -124,12 +135,13 @@ type Buffer struct {
 	windowStart uint
 	windowEnd   uint
 	height      uint
+	numLine     [][]rune
 	fullText    [][]rune
 }
 
 func NewBuffer(height int, text [][]rune) *Buffer {
 	return &Buffer{
-		cursor: Cursor{col: 5, row: 0},
+		cursor:      Cursor{col: 5, row: 0},
 		windowStart: 0,
 		windowEnd:   uint(min(height, len(text))),
 		height:      uint(height),
