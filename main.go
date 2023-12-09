@@ -30,9 +30,23 @@ func main() {
 	style := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
 	s.SetStyle(style)
 
-	f, err := os.Open("utf8_demo.txt")
-	if err != nil {
-		panic(err)
+	var f *os.File
+	for i, arg := range os.Args {
+		switch i {
+		case 0:
+			f, err = os.Open("utf8_demo.txt")
+			if err != nil {
+				panic(err)
+			}
+		case 1:
+			f, err = os.Open(arg)
+			if err != nil {
+				f, err = os.Create(arg)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
 	}
 	b, err := io.ReadAll(f)
 	if err != nil {
@@ -50,8 +64,8 @@ func main() {
 	_, h := s.Size()
 	buf := &Buffer{
 		windowStart: 0,
-		windowEnd:   uint(h),
-		height: uint(h),
+		windowEnd:   uint(min(h, len(rtext))),
+		height:      uint(h),
 		fullText:    rtext,
 	}
 
@@ -99,27 +113,27 @@ func main() {
 type Cursor struct{ col, row int }
 
 type Buffer struct {
-	cursor Cursor
+	cursor      Cursor
 	windowStart uint
 	windowEnd   uint
-	height			uint
+	height      uint
 	fullText    [][]rune
 }
 
 func (b *Buffer) UpdateRow(by int) {
-		b.cursor.row += by
-		switch {
-		case by < 0:
-			if b.cursor.row < int(b.height/2) && b.windowStart > 0 {
-				b.cursor.row++
-				b.windowStart--
-				b.windowEnd--
-			}
-		case by > 0:
-			if b.cursor.row > int(b.height/2) && b.windowEnd < uint(len(b.fullText)) {
-				b.cursor.row--
-				b.windowStart++
-				b.windowEnd++
-			}
+	b.cursor.row += by
+	switch {
+	case by < 0:
+		if b.cursor.row < int(b.height/2) && b.windowStart > 0 {
+			b.cursor.row++
+			b.windowStart--
+			b.windowEnd--
 		}
+	case by > 0:
+		if b.cursor.row > int(b.height/2) && b.windowEnd < uint(len(b.fullText)) {
+			b.cursor.row--
+			b.windowStart++
+			b.windowEnd++
+		}
+	}
 }
