@@ -20,6 +20,8 @@ type Gim struct {
 func (g Gim) Draw() {
 	g.screen.Clear()
 
+	g.screen.ShowCursor(g.focus.cursor.col, g.focus.cursor.row)
+
 	for row, line := range g.focus.Window() {
 		start := strconv.Itoa(row + 1 + int(g.focus.windowStart))
 		padding := 3 // TODO(jay): Needs to be from g.focus.fullText
@@ -30,10 +32,18 @@ func (g Gim) Draw() {
 			}
 			g.screen.SetContent(i, row, r, nil, g.style)
 		}
-		g.screen.SetContent(padding, row, tcell.RuneVLine, nil, g.style)
+		g.screen.SetContent(padding, row, tcell.RuneVLine, nil, g.style.Dim(true))
 		for col, r := range line {
-			g.screen.ShowCursor(g.focus.cursor.col, g.focus.cursor.row)
-			g.screen.SetContent(col+4, row, r, nil, g.style)
+			style := g.style
+			switch r {
+			case ' ':
+				r = tcell.RuneBullet
+				style = style.Dim(true)
+			case '	':
+				r = tcell.RuneRArrow
+				style = style.Dim(true)
+			}
+			g.screen.SetContent(col+4, row, r, nil, style)
 		}
 	}
 
@@ -88,8 +98,8 @@ func main() {
 	}
 
 	text := bytes.Split(b, []byte("\n"))
-	rtext := make([][]rune, len(text))
-	for i, line := range text {
+	rtext := make([][]rune, len(text)-1)
+	for i, line := range text[:len(text)-1] {
 		rtext[i] = bytes.Runes(line)
 	}
 	_, h := s.Size()
