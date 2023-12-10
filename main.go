@@ -15,7 +15,61 @@ type Gim struct {
 	focus   *Buffer
 	buffers []*Buffer
 	style   tcell.Style
+	mode    Mode
+	run     bool
 }
+
+type Mode uint8
+
+func (g *Gim) Handle() {
+	switch g.mode {
+	case ModeNormal:
+		switch ev := g.screen.PollEvent().(type) {
+		case *tcell.EventKey:
+			switch ev.Key() {
+			case tcell.KeyCtrlC:
+				g.run = false
+			case tcell.KeyDown:
+				g.focus.UpdateRow(1)
+			case tcell.KeyUp:
+				g.focus.UpdateRow(-1)
+			case tcell.KeyLeft:
+				g.focus.cursor.col--
+			case tcell.KeyRight:
+				g.focus.cursor.col++
+			}
+
+			switch ev.Rune() {
+			case 'j':
+				g.focus.UpdateRow(1)
+			case 'k':
+				g.focus.UpdateRow(-1)
+			case 'h':
+				g.focus.cursor.col--
+			case 'l':
+				g.focus.cursor.col++
+			case 'i':
+				g.mode = ModeInsert
+				g.screen.SetCursorStyle(tcell.CursorStyleBlinkingBar)
+			}
+		}
+	case ModeInsert:
+		switch ev := g.screen.PollEvent().(type) {
+		case *tcell.EventKey:
+			if ev.Key() == tcell.KeyESC {
+				g.mode = ModeNormal
+				g.screen.SetCursorStyle(tcell.CursorStyleSteadyBlock)
+				return
+			}
+			g.focus.Insert(ev.Rune())
+		}
+	}
+}
+
+const (
+	ModeNormal Mode = iota
+	ModeInsert
+)
 
 func (g Gim) Draw() {
 	g.screen.Clear()
@@ -24,7 +78,7 @@ func (g Gim) Draw() {
 
 	for row, line := range g.focus.Window() {
 		start := strconv.Itoa(row + 1 + int(g.focus.windowStart))
-		padding := 3 // TODO(jay): Needs to be from g.focus.fullText
+		padding := len(strconv.Itoa(len(g.focus.fullText)))
 		for i := 0; i < padding; i++ {
 			r := ' '
 			if diff := padding - len(start) - i; diff < 1 {
@@ -104,37 +158,12 @@ func main() {
 	}
 	_, h := s.Size()
 	buf := NewBuffer(h, rtext)
-	gim := Gim{screen: s, focus: buf, buffers: []*Buffer{buf}, style: style}
+	gim := Gim{run: true, screen: s, focus: buf, buffers: []*Buffer{buf}, style: style}
 
-	for {
+	for gim.run {
 		gim.Draw()
 
-		switch ev := s.PollEvent().(type) {
-		case *tcell.EventKey:
-			switch ev.Key() {
-			case tcell.KeyCtrlC:
-				return
-			case tcell.KeyDown:
-				buf.UpdateRow(1)
-			case tcell.KeyUp:
-				buf.UpdateRow(-1)
-			case tcell.KeyLeft:
-				buf.cursor.col--
-			case tcell.KeyRight:
-				buf.cursor.col++
-			}
-
-			switch ev.Rune() {
-			case 'j':
-				buf.UpdateRow(1)
-			case 'k':
-				buf.UpdateRow(-1)
-			case 'h':
-				buf.cursor.col--
-			case 'l':
-				buf.cursor.col++
-			}
-		}
+		gim.Handle()
 	}
 }
 
@@ -145,7 +174,6 @@ type Buffer struct {
 	windowStart uint
 	windowEnd   uint
 	height      uint
-	numLine     [][]rune
 	fullText    [][]rune
 }
 
@@ -157,6 +185,10 @@ func NewBuffer(height int, text [][]rune) *Buffer {
 		height:      uint(height),
 		fullText:    text,
 	}
+}
+
+func (b Buffer) Insert(r rune) {
+	b.fullText[uint(b.cursor.row)+b.windowStart][b.cursor.col] = r
 }
 
 func (b Buffer) Window() [][]rune {
