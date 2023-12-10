@@ -78,7 +78,7 @@ func (g Gim) Draw() {
 
 	for row, line := range g.focus.Window() {
 		start := strconv.Itoa(row + 1 + int(g.focus.windowStart))
-		padding := len(strconv.Itoa(len(g.focus.fullText)))
+		padding := g.focus.NumLinePadding() 
 		for i := 0; i < padding; i++ {
 			r := ' '
 			if diff := padding - len(start) - i; diff < 1 {
@@ -178,17 +178,23 @@ type Buffer struct {
 }
 
 func NewBuffer(height int, text [][]rune) *Buffer {
-	return &Buffer{
-		cursor:      Cursor{col: 5, row: 0},
+	b := &Buffer{
+		cursor:      Cursor{col: 0, row: 0},
 		windowStart: 0,
 		windowEnd:   uint(min(height, len(text))),
 		height:      uint(height),
 		fullText:    text,
 	}
+	b.cursor.col = b.NumLinePadding()+1
+	return b
 }
 
-func (b Buffer) Insert(r rune) {
-	b.fullText[uint(b.cursor.row)+b.windowStart][b.cursor.col] = r
+func (b *Buffer) Insert(r rune) {
+	row := b.fullText[uint(b.cursor.row)+b.windowStart]
+	pos := b.cursor.col-(b.NumLinePadding()+1)
+	row = append(row[:pos], append([]rune{r}, row[pos:]...)...)
+	b.fullText[uint(b.cursor.row)+b.windowStart] = row
+	b.cursor.col++
 }
 
 func (b Buffer) Window() [][]rune {
@@ -211,4 +217,8 @@ func (b *Buffer) UpdateRow(by int) {
 			b.windowEnd++
 		}
 	}
+}
+
+func (b Buffer) NumLinePadding() int {
+	return len(strconv.Itoa(len(b.fullText)))
 }
