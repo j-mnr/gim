@@ -10,6 +10,29 @@ import (
 	"github.com/gdamore/tcell/v2"
 )
 
+func init() {
+	f, err := os.Create("debug.log")
+	if err != nil {
+		panic(err)
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
+		AddSource: true,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			switch a.Key {
+			case "level":
+				return slog.Attr{}
+			case "time":
+				// a.Value = slog.StringValue(a.Value.Time().Format("15:04:05.000"))
+				// return a
+				return slog.Attr{}
+			default:
+				return a
+			}
+		},
+	})))
+}
+
 type Gim struct {
 	screen  tcell.Screen
 	focus   *Buffer
