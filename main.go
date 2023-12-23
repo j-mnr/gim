@@ -79,7 +79,11 @@ func (g *Gim) Handle() {
 	case ModeInsert:
 		switch ev := g.screen.PollEvent().(type) {
 		case *tcell.EventKey:
-			if ev.Key() == tcell.KeyESC {
+			switch ev.Key() {
+			case tcell.KeyBS, tcell.KeyDEL:
+				g.focus.RemoveRune()
+				return
+			case tcell.KeyESC:
 				g.mode = ModeNormal
 				g.screen.SetCursorStyle(tcell.CursorStyleSteadyBlock)
 				return
@@ -99,9 +103,9 @@ func (g Gim) Draw() {
 
 	g.screen.ShowCursor(g.focus.cursor.col, g.focus.cursor.row)
 
+	padding := g.focus.NumLinePadding()
 	for row, line := range g.focus.Window() {
 		start := strconv.Itoa(row + 1 + int(g.focus.windowStart))
-		padding := g.focus.NumLinePadding() 
 		for i := 0; i < padding; i++ {
 			r := ' '
 			if diff := padding - len(start) - i; diff < 1 {
@@ -120,7 +124,7 @@ func (g Gim) Draw() {
 				r = tcell.RuneRArrow
 				style = style.Dim(true)
 			}
-			g.screen.SetContent(col+4, row, r, nil, style)
+			g.screen.SetContent(col+padding+1, row, r, nil, style)
 		}
 	}
 
@@ -208,16 +212,31 @@ func NewBuffer(height int, text [][]rune) *Buffer {
 		height:      uint(height),
 		fullText:    text,
 	}
-	b.cursor.col = b.NumLinePadding()+1
+	b.cursor.col = b.NumLinePadding() + 1
 	return b
 }
 
 func (b *Buffer) Insert(r rune) {
 	row := b.fullText[uint(b.cursor.row)+b.windowStart]
-	pos := b.cursor.col-(b.NumLinePadding()+1)
+	pos := b.cursor.col - (b.NumLinePadding() + 1)
 	row = append(row[:pos], append([]rune{r}, row[pos:]...)...)
 	b.fullText[uint(b.cursor.row)+b.windowStart] = row
 	b.cursor.col++
+}
+
+func (b *Buffer) RemoveRune() {
+	row := b.fullText[uint(b.cursor.row)+b.windowStart]
+	if len(row) == 0 {
+		return
+	}
+
+	pos := b.cursor.col - (b.NumLinePadding() + 1)
+	if pos-1 < 0 {
+		return
+	}
+	row = append(row[:pos-1], row[pos:]...)
+	b.fullText[uint(b.cursor.row)+b.windowStart] = row
+	b.cursor.col--
 }
 
 func (b Buffer) Window() [][]rune {
@@ -243,5 +262,7 @@ func (b *Buffer) UpdateRow(by int) {
 }
 
 func (b Buffer) NumLinePadding() int {
-	return len(strconv.Itoa(len(b.fullText)))
+	n := len(b.fullText)
+	slog.Debug("NumLinePadding", "text length", n)
+	return len(strconv.Itoa(n))
 }
